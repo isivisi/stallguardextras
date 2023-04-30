@@ -18,6 +18,8 @@ class StallGuardExtras:
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
         self.crashThreshold = int(config.get("crash_threshold", 600))
+        #self.sgthrs = 250
+        #self.sgt = None
         self.loop = None
 
         self.drivers = {}
@@ -29,7 +31,9 @@ class StallGuardExtras:
             if any(driver.lower() in name.lower() for driver in self.supportedDrivers):
                 driverDetails = {
                     'driver': None,
-                    'history': None
+                    'history': None,
+                    'expectedRange': 25,
+                    'triggers': 0
                 }
                 if ('extruder' in name): self.extruders.append(obj)
                 else: 
@@ -43,9 +47,31 @@ class StallGuardExtras:
         gcode.register_command("ENABLE_STALLGUARD_CHECKS", self.enableChecks, desc="")
         gcode.register_command("DISABLE_STALLGUARD_CHECKS", self.disableChecks, desc="")
         gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
+        gcode.register_command("DEBUG_QUERY_OBJECTS", self.queryObjects, desc="")
 
     def onKlippyConnect(self):
+        #self.setupDrivers()
         self.enableChecks()
+
+    '''
+    def setupDrivers(self):
+        for d in self.drivers:
+            driver = self.drivers[d]["driver"];
+            # set drivers stallguard strength if specified
+            if (self.sgthrs != None and self.driverHasField(driver, 'sgthrs')):
+                driver.fields.set_field("sgthrs", int(self.sgthrs))
+            elif (self.sgt != None and self.driverHasField(driver, 'sgt')):
+                driver.fields.set_field("sgt", int(self.sgt))
+    
+    def driverHasField(self, driver, field):
+        return field in driver.fields.field_to_register.keys()
+    '''
+
+    def lerp(self, start, end, delta):
+        return (start + (end - start) * delta)
+
+    def queryObjects(self, gcmd):
+        gcmd.respond_info(str(self.printer.lookup_objects()))
 
     def debug(self, gcmd):
         #gcmd.respond_info(str(self.printer.lookup_objects()))
@@ -70,11 +96,13 @@ class StallGuardExtras:
         # diag_pin
 
         # SGTHRS // set threshold
-        # SG_RESULT // get result
+        # SG_RESULT // get result 0 - 510
         
         # driver
         for d in self.drivers:
             driverInfo = self.drivers[d]
+            
+            # driver.get_status mcu_phase_offset, phase_offset_position, run_current, hold_current
 
             result = int(driverInfo["driver"].mcu_tmc.get_register('SG_RESULT'))
 
@@ -89,14 +117,39 @@ class StallGuardExtras:
 
             # todo: use (current / expected current) to influence the crashThreshold
 
-            if (difference > self.crashThreshold):
-                logging.info("Detecting motor slip, transient peaked %s for motor %s, %s more than previous value" % (str(result), d, str(difference)))
-                self.printer.invoke_shutdown("Detecting motor slip, transient peaked %s for motor %s, %s more than previous value" % (str(result), d, str(difference)))
-                #self.printer.invoke_shutdown("Shutdown due to stallguard on driver %s." % (d,str(result)))
+            velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
+
+            velToRange = max(10, self.lerp(0, 510, velocity/600))
+            expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
+            
+            if (velToRange > expectedRange): expectedRange = velToRange
+
+            if (result > expectedRange):
+                logging.info("Detecting motor slip, %s exceeded expected limit %s on motor %s" % (str(result), str(expectedRange), d))
+                
+                
+                driverInfo["triggers"] += 1
+
+                if (driverInfo["triggers"] > 5):
+                    self.printer.invoke_shutdown("Detecting motor slip, %s exceeded expected limit %s on motor %s" % (str(result), str(expectedRange), d))
+
+            else:
+                driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
 
             driverInfo["history"] = result
+            driverInfo["expectedRange"] = expectedRange
         
         return eventtime + self.updateTime
+
+    def get_status(self, eventtime):
+        data = {}
+        for d in self.drivers:
+            data[d] = {
+                "sg_result": self.drivers[d]["history"],
+                "sg_expected_range": self.drivers[d]["expectedRange"],
+                "sg_triggers": self.drivers[d]["triggers"],
+            }
+        return data
 
 def load_config(config):
     return StallGuardExtras(config)

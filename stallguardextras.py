@@ -1,4 +1,4 @@
-# A utility class to test resonances of the printer
+# Utilizing stallguard
 #
 # Copyright (C) 2023 John Iannandrea    <jiannandrea@gmail.com>
 #

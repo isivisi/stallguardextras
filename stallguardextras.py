@@ -17,7 +17,7 @@ class StallGuardExtras:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
-        self.crashThreshold = int(config.get("crash_threshold", 600))
+        self.crashThreshold = int(config.get("crash_threshold", 25))
         #self.sgthrs = 250
         #self.sgt = None
         self.loop = None
@@ -41,7 +41,10 @@ class StallGuardExtras:
                     self.drivers[name.split(" ")[1]] = driverDetails
                 logging.info("found stallguard compatible driver " + str(obj))
 
-        self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
+        #self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
+
+        self.printer.register_event_handler("stepper_enable:motor_off", self.onMotorOff)
+        self.printer.register_event_handler("homing:homing_move_begin", self.onMotorOn)
 
         gcode = self.printer.lookup_object("gcode")
         gcode.register_command("ENABLE_STALLGUARD_CHECKS", self.enableChecks, desc="")
@@ -51,6 +54,12 @@ class StallGuardExtras:
 
     def onKlippyConnect(self):
         #self.setupDrivers()
+        self.enableChecks()
+
+    def onMotorOff(self, eventtime):
+        self.disableChecks()
+
+    def onMotorOn(self, eventtime):
         self.enableChecks()
 
     '''
@@ -118,8 +127,9 @@ class StallGuardExtras:
             # todo: use (current / expected current) to influence the crashThreshold
 
             velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
-
-            velToRange = max(10, self.lerp(0, 510, velocity/600))
+            
+            #todo exponential curve, it says its linear but its not, maybe because im using overall velocity?
+            velToRange = max(10, self.lerp(0, 510, velocity/1500)) + self.crashThreshold
             expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
             
             if (velToRange > expectedRange): expectedRange = velToRange
@@ -130,7 +140,7 @@ class StallGuardExtras:
                 
                 driverInfo["triggers"] += 1
 
-                if (driverInfo["triggers"] > 5):
+                if (driverInfo["triggers"] > 15):
                     self.printer.invoke_shutdown("Detecting motor slip, %s exceeded expected limit %s on motor %s" % (str(result), str(expectedRange), d))
 
             else:

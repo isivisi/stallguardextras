@@ -8,7 +8,10 @@ import logging
 
 class StallGuardExtras:
     supportedDrivers = [
-        'TMC2209'
+        'TMC2130',
+        'TMC2209',
+        'TMC2660',
+        'TMC5160',
     ]
     
     def __init__(self, config):
@@ -56,7 +59,7 @@ class StallGuardExtras:
             self.printer.get_reactor().unregister_timer(self.loop)
             self.loop = None
     
-    def doChecks(self):
+    def doChecks(self, eventtime):
         # diag_pin
 
         # SGTHRS // set threshold
@@ -68,7 +71,7 @@ class StallGuardExtras:
             # logging.warning()
             # raise self.printer.command_error()
 
-        return self.printer.get_reactor().NEVER
+        return eventtime + self.updateTime
 
 def load_config(config):
     return StallGuardExtras(config)

@@ -118,10 +118,15 @@ class StallGuardExtras:
         # driver
         for d in self.drivers:
             driverInfo = self.drivers[d]
+
+            status = driverInfo["driver"].get_status()
             
             # driver.get_status mcu_phase_offset, phase_offset_position, run_current, hold_current
 
             result = int(driverInfo["driver"].mcu_tmc.get_register('SG_RESULT'))
+            standStillIndicator = True
+            if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
+            #actualMotorCurrent = status['drv_status']['cs_actual']
 
             if (driverInfo["history"] == None): driverInfo["history"] = result
 
@@ -136,25 +141,23 @@ class StallGuardExtras:
 
             velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
             
-            #todo exponential curve, it says its linear but its not, maybe because im using overall velocity?
-            resultSkewedByVel = self.lerp(100, 1, velocity/1500) * result
             #expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
             
             #if (velToRange > expectedRange): expectedRange = velToRange
 
-            if (resultSkewedByVel <= 0 and velocity > 3):
+            if (result <= 0 and not standStillIndicator):
                 logging.info("Detecting motor slip on motor %s" % (d,))
                 
                 
                 driverInfo["triggers"] += 1
 
-                if (driverInfo["triggers"] > 10 + self.lerp(500, 0, velocity/1500)):
+                if (driverInfo["triggers"] > 10 + self.lerp(75, 0, velocity/1500)):
                     self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
 
             else:
                 driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
 
-            driverInfo["history"] = resultSkewedByVel
+            driverInfo["history"] = result
             #driverInfo["expectedRange"] = expectedRange
 
             #self.csv.append("%s,%s,%s" % (d, str(result), str(eventtime)))

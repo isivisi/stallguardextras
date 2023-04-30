@@ -18,12 +18,14 @@ class StallGuardExtras:
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
         self.crashThreshold = int(config.get("crash_threshold", 25))
-        #self.sgthrs = 250
-        #self.sgt = None
+        self.sgthrs = config.get("sgthrs", None)
+        self.sgt = config.get("sgt", None)
         self.loop = None
 
         self.drivers = {}
         self.extruders = []
+
+        #self.csv = []
 
         logging.info("--- Stall guard extras loaded ---")
 
@@ -59,10 +61,16 @@ class StallGuardExtras:
     def onMotorOff(self, eventtime):
         self.disableChecks()
 
+        #with open("stallout.csv", "w") as txt_file:
+        #    for line in self.csv:
+        #        txt_file.write(line + "\n")
+        
+        #self.csv = []
+
     def onMotorOn(self, eventtime):
         self.enableChecks()
 
-    '''
+    
     def setupDrivers(self):
         for d in self.drivers:
             driver = self.drivers[d]["driver"];
@@ -74,7 +82,7 @@ class StallGuardExtras:
     
     def driverHasField(self, driver, field):
         return field in driver.fields.field_to_register.keys()
-    '''
+    
 
     def lerp(self, start, end, delta):
         return (start + (end - start) * delta)
@@ -129,25 +137,27 @@ class StallGuardExtras:
             velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
             
             #todo exponential curve, it says its linear but its not, maybe because im using overall velocity?
-            velToRange = max(10, self.lerp(0, 510, velocity/1500)) + self.crashThreshold
-            expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
+            resultSkewedByVel = self.lerp(100, 1, velocity/1500) * result
+            #expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
             
-            if (velToRange > expectedRange): expectedRange = velToRange
+            #if (velToRange > expectedRange): expectedRange = velToRange
 
-            if (result > expectedRange):
-                logging.info("Detecting motor slip, %s exceeded expected limit %s on motor %s" % (str(result), str(expectedRange), d))
+            if (resultSkewedByVel <= 0 and velocity > 3):
+                logging.info("Detecting motor slip on motor %s" % (d,))
                 
                 
                 driverInfo["triggers"] += 1
 
-                if (driverInfo["triggers"] > 15):
-                    self.printer.invoke_shutdown("Detecting motor slip, %s exceeded expected limit %s on motor %s" % (str(result), str(expectedRange), d))
+                if (driverInfo["triggers"] > 10 + self.lerp(500, 0, velocity/1500)):
+                    self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
 
             else:
                 driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
 
-            driverInfo["history"] = result
-            driverInfo["expectedRange"] = expectedRange
+            driverInfo["history"] = resultSkewedByVel
+            #driverInfo["expectedRange"] = expectedRange
+
+            #self.csv.append("%s,%s,%s" % (d, str(result), str(eventtime)))
         
         return eventtime + self.updateTime
 

@@ -160,7 +160,6 @@ class StallGuardExtras:
 
         # TODO: cleanup, force rehome on x and y when slipping, cant do anything with z though :(
         # TODO: deal with big transient spikes being set as expected, forcing failure
-        # need some sort of wide adverage grab instead of grabbing 1 value when velocity changes
 
         #velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
         
@@ -185,16 +184,14 @@ class StallGuardExtras:
             if (velocity != self.lastVelocity): driverInfo["expectedPos"] = result
 
             difference = driverInfo["expectedPos"] - result
-            
-            expectedDropRange = 50
 
-            expectedDropRange = self.lerp(driverInfo["expectedRange"], 50, self.updateTime * 0.5)
+            expectedDropRange = self.lerp(driverInfo["expectedRange"], 15, self.updateTime * 0.5)
             if (self.lastVelocity != velocity): expectedDropRange = 100
             
             if (difference > expectedDropRange and not standStillIndicator):
                 driverInfo["triggers"] += 1
-                #if (driverInfo["triggers"] > 10):
-                    #self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
+                if (driverInfo["triggers"] > 10):
+                    self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
             else:
                 driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
             driverInfo["history"] = result

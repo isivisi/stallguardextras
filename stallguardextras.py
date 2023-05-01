@@ -146,16 +146,9 @@ class StallGuardExtras:
             #if (velToRange > expectedRange): expectedRange = velToRange
 
             if (result <= 0 and not standStillIndicator):
-                logging.info("Detecting motor slip on motor %s" % (d,))
-                
-                
-                driverInfo["triggers"] += 1
+                logging.info("Detecting motor slip on motor %s. %s/%s" % (d, str(driverInfo["triggers"]+1), str(2 + self.lerp(75, 0, velocity/1500))))
 
-                if (driverInfo["triggers"] > 10 + self.lerp(75, 0, velocity/1500)):
-                    self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
-
-            else:
-                driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
+                self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
 
             driverInfo["history"] = result
             #driverInfo["expectedRange"] = expectedRange
@@ -169,7 +162,6 @@ class StallGuardExtras:
         for d in self.drivers:
             data[d] = {
                 "sg_result": self.drivers[d]["history"],
-                "sg_expected_range": self.drivers[d]["expectedRange"],
                 "sg_triggers": self.drivers[d]["triggers"],
             }
         return data

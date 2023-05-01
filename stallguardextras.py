@@ -35,7 +35,8 @@ class StallGuardExtras:
                     'driver': None,
                     'history': None,
                     'expectedRange': 25,
-                    'triggers': 0
+                    'triggers': 0,
+                    'type': name.split(" ")[0]
                 }
                 if ('extruder' in name): self.extruders.append(obj)
                 else: 
@@ -68,6 +69,7 @@ class StallGuardExtras:
         #self.csv = []
 
     def onMotorOn(self, eventtime):
+        self.setupDrivers()
         self.enableChecks()
 
     
@@ -133,18 +135,15 @@ class StallGuardExtras:
             if (result > 400): 
                 logging.info("driver %s value %s, current %s" % (d, str(result), 0))
 
-            # raise self.printer.command_error()
-
             difference = result - driverInfo["history"]
 
-            # todo: use (current / expected current) to influence the crashThreshold
-
-            velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
+            #velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
             
             #expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
-            
             #if (velToRange > expectedRange): expectedRange = velToRange
 
+            # todo go back to a transient check aswell as this for better detection? now that I got stallguard to work XD
+            
             if (result <= 0 and not standStillIndicator):
                 logging.info("Detecting motor slip on motor %s. %s/%s" % (d, str(driverInfo["triggers"]+1), str(2 + self.lerp(75, 0, velocity/1500))))
 

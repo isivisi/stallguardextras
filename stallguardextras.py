@@ -36,6 +36,7 @@ class StallGuardExtras:
                     'history': None,
                     'expectedRange': 25,
                     'triggers': 0,
+                    'expectedPos': 0,
                     'type': name.split(" ")[0]
                 }
                 if ('extruder' in name): self.extruders.append(obj)
@@ -54,6 +55,7 @@ class StallGuardExtras:
         gcode.register_command("DISABLE_STALLGUARD_CHECKS", self.disableChecks, desc="")
         gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
         gcode.register_command("DEBUG_QUERY_OBJECTS", self.queryObjects, desc="")
+        gcode.register_command("TUNE_STALLGUARD", self.tune, desc="")
 
     def onKlippyConnect(self):
         #self.setupDrivers()
@@ -71,7 +73,6 @@ class StallGuardExtras:
     def onMotorOn(self, eventtime):
         self.setupDrivers()
         self.enableChecks()
-
     
     def setupDrivers(self):
         for d in self.drivers:
@@ -85,6 +86,22 @@ class StallGuardExtras:
     def driverHasField(self, driver, field):
         return field in driver.fields.field_to_register.keys()
     
+    # move the toolhead safely within printing speeds to finetune the stallguard settings
+    def tune(self, gcmd):
+        self.disableChecks()
+        self.setupDrivers()
+
+        toolhead = self.printer.lookup_object('toolhead')
+        # X, Y, Z, E = toolhead.get_position()
+        # toolhead.move([x,y,z,e], max_v)
+        #todo loop through different speeds moving along axis
+        # slowly lower threshold and transient settings until movement no longer considered stalling
+
+        # output settings
+
+        # SAVE_CONFIG
+        configfile = self.printer.lookup_object('configfile')
+        configfile.set('stallguardextras', 'sgthrs', '0')
 
     def lerp(self, start, end, delta):
         return (start + (end - start) * delta)
@@ -111,11 +128,14 @@ class StallGuardExtras:
             self.printer.get_reactor().unregister_timer(self.loop)
             self.loop = None
     
+    lastVelocity = 0
     def doChecks(self, eventtime):
         # diag_pin
 
         # SGTHRS // set threshold
         # SG_RESULT // get result 0 - 510
+
+        velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
         
         # driver
         for d in self.drivers:
@@ -132,27 +152,25 @@ class StallGuardExtras:
 
             if (driverInfo["history"] == None): driverInfo["history"] = result
 
-            if (result > 400): 
-                logging.info("driver %s value %s, current %s" % (d, str(result), 0))
+            if (velocity != self.lastVelocity): driverInfo["expectedPos"] = result
 
-            difference = result - driverInfo["history"]
-
-            #velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
+            difference = driverInfo["expectedPos"] - result
             
-            #expectedRange = self.lerp(driverInfo["expectedRange"], velToRange, self.updateTime * 0.5)
-            #if (velToRange > expectedRange): expectedRange = velToRange
+            expectedDropRange = 50
 
-            # todo go back to a transient check aswell as this for better detection? now that I got stallguard to work XD
+            expectedDropRange = self.lerp(driverInfo["expectedRange"], 50, self.updateTime * 0.5)
+            if (self.lastVelocity != velocity): expectedDropRange = 100
             
-            if (result <= 0 and not standStillIndicator):
-                logging.info("Detecting motor slip on motor %s. %s/%s" % (d, str(driverInfo["triggers"]+1), str(2 + self.lerp(75, 0, velocity/1500))))
-
-                self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
-
+            if (difference > expectedDropRange and not standStillIndicator):
+                driverInfo["triggers"] += 1
+                if (driverInfo["triggers"] > 10):
+                    self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
+            else:
+                driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
             driverInfo["history"] = result
-            #driverInfo["expectedRange"] = expectedRange
+            driverInfo["expectedRange"] = expectedDropRange
 
-            #self.csv.append("%s,%s,%s" % (d, str(result), str(eventtime)))
+        self.lastVelocity = velocity
         
         return eventtime + self.updateTime
 
@@ -161,6 +179,7 @@ class StallGuardExtras:
         for d in self.drivers:
             data[d] = {
                 "sg_result": self.drivers[d]["history"],
+                "sg_expected": self.drivers[d]["expectedPos"],
                 "sg_triggers": self.drivers[d]["triggers"],
             }
         return data

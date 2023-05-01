@@ -135,6 +135,8 @@ class StallGuardExtras:
         # SGTHRS // set threshold
         # SG_RESULT // get result 0 - 510
 
+        # TODO: cleanup, force rehome on x and y when slipping, cant do anything with z though :(
+
         velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
         
         # driver

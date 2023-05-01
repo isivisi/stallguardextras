@@ -5,7 +5,8 @@ A simple klipper plugin that queries for stall guard warnings
 ```
 [stallguardextras]
 update_time: 1.0 # time in seconds to query the drivers
-crash_threshold: 30
+# sgthrs: 200
+# sgt: 0
 ```
 
 ## Moonraker Auto Update

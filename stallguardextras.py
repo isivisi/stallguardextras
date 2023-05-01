@@ -4,7 +4,8 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
-import logging
+import logging, chelper
+#from motion_report import DumpTrapQ
 
 class StallGuardExtras:
     supportedDrivers = [
@@ -23,29 +24,9 @@ class StallGuardExtras:
         self.loop = None
 
         self.drivers = {}
-        self.extruders = []
+        self.extruders = []            
 
-        #self.csv = []
-
-        logging.info("--- Stall guard extras loaded ---")
-
-        for name, obj in self.printer.lookup_objects():
-            if any(driver.lower() in name.lower() for driver in self.supportedDrivers):
-                driverDetails = {
-                    'driver': None,
-                    'history': None,
-                    'expectedRange': 25,
-                    'triggers': 0,
-                    'expectedPos': 0,
-                    'type': name.split(" ")[0]
-                }
-                if ('extruder' in name): self.extruders.append(obj)
-                else: 
-                    driverDetails["driver"] = obj
-                    self.drivers[name.split(" ")[1]] = driverDetails
-                logging.info("found stallguard compatible driver " + str(obj))
-
-        #self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
+        self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
 
         self.printer.register_event_handler("stepper_enable:motor_off", self.onMotorOff)
         self.printer.register_event_handler("homing:homing_move_begin", self.onMotorOn)
@@ -56,10 +37,38 @@ class StallGuardExtras:
         gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
         gcode.register_command("DEBUG_QUERY_OBJECTS", self.queryObjects, desc="")
         gcode.register_command("TUNE_STALLGUARD", self.tune, desc="")
+        gcode.register_command("DEBUG_MOVE", self.debugMove, desc="")
 
     def onKlippyConnect(self):
         #self.setupDrivers()
-        self.enableChecks()
+        #self.enableChecks()
+
+        toolhead = self.printer.lookup_object("toolhead")
+        kin = self.printer.lookup_object("toolhead").get_kinematics()
+        steppers = kin.get_steppers()
+
+        #logging.info(str([s.get_name() for s in steppers]))
+
+        # find all compatable drivers
+        for name, obj in self.printer.lookup_objects():
+            if any(driver.lower() in name.lower() for driver in self.supportedDrivers):
+                stepper = [s for s in steppers if s.get_name() == name.split(" ")[1]]
+                logging.info("%s found %s" % (name, str(stepper)))
+                driverDetails = {
+                    'driver': None,
+                    'history': None,
+                    'expectedRange': 25,
+                    'triggers': 0,
+                    'expectedPos': 0,
+                    'type': name.split(" ")[0],
+                    'trapq': stepper[0].get_trapq() if len(stepper) else None, # Trapezoidal velocity queue for stepper
+                }
+                if ('extruder' in name):
+                    self.extruders.append(obj)
+                else:
+                    driverDetails["driver"] = obj
+                    self.drivers[name.split(" ")[1]] = driverDetails
+                logging.info("found stallguard compatible driver " + str(obj))
 
     def onMotorOff(self, eventtime):
         self.disableChecks()
@@ -127,6 +136,20 @@ class StallGuardExtras:
         if (self.loop != None):
             self.printer.get_reactor().unregister_timer(self.loop)
             self.loop = None
+
+    def debugMove(self, gcmd):
+        move = self.getLastMove(self.printer.get_reactor().monotonic())
+        gcmd.respond_info("start_v:%s, move_t:%s, accel:%s\nx_r:%s x_y:%s x_z:%s" % (str(move.start_v), str(move.move_t), str(move.accel), str(move.x_r), str(move.y_r), str(move.z_r)))
+
+    def getLastMove(self, stepperInfo, eventtime):
+        print_time = self.printer.lookup_object('mcu').estimated_print_time(eventtime)
+        ffi_main, ffi_lib = chelper.get_ffi()
+        data = ffi_main.new('struct pull_move[1]') # make a new move struct
+        count = ffi_lib.trapq_extract_old(stepperInfo["trapq"], data, 1, 0., print_time) # fill move struct with last value in steppers movement queue
+        if not count:
+            return None
+        # start_v, move_t, print_time, accel, start_x, start_y, start_z x_r, y_r, z_r
+        return data[0]
     
     lastVelocity = 0
     def doChecks(self, eventtime):
@@ -136,12 +159,17 @@ class StallGuardExtras:
         # SG_RESULT // get result 0 - 510
 
         # TODO: cleanup, force rehome on x and y when slipping, cant do anything with z though :(
+        # TODO: deal with big transient spikes being set as expected, forcing failure
+        # need some sort of wide adverage grab instead of grabbing 1 value when velocity changes
 
-        velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
+        #velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
         
         # driver
         for d in self.drivers:
             driverInfo = self.drivers[d]
+
+            last_move = self.getLastMove(driverInfo, eventtime)
+            velocity = last_move.start_v + last_move.accel if last_move else 0
 
             status = driverInfo["driver"].get_status()
             
@@ -165,8 +193,8 @@ class StallGuardExtras:
             
             if (difference > expectedDropRange and not standStillIndicator):
                 driverInfo["triggers"] += 1
-                if (driverInfo["triggers"] > 10):
-                    self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
+                #if (driverInfo["triggers"] > 10):
+                    #self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
             else:
                 driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
             driverInfo["history"] = result

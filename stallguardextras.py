@@ -35,6 +35,11 @@ class DriverHelper:
 
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
 
+        if (standStillIndicator):
+            self.triggers = 0
+            self.expectedPos = result
+            return
+
         if (self.history == None): self.history = result
 
         if (velocity != self.lastVelocity): self.expectedPos = result
@@ -44,12 +49,12 @@ class DriverHelper:
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
         if (self.lastVelocity != velocity): expectedDropRange = self.deviationTolerance * 2
             
-        if (difference > expectedDropRange and not standStillIndicator):
+        if (difference > expectedDropRange):
             self.triggers += 1
-            if (self.triggers <= 1):
+            if (self.triggers <= 2):
                 logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
                 self.expectedPos = lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
-            if (self.triggers > 10):
+            if (self.triggers > 2):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
         else:

@@ -127,13 +127,13 @@ class StallGuardExtras:
             responses[name] = int(self.drivers[name]["driver"].mcu_tmc.get_register('SG_RESULT'))
         gcmd.respond_info(str(responses))
 
-    def enableChecks(self):
+    def enableChecks(self, gcmd=None):
         if (self.loop == None):
             reactor = self.printer.get_reactor()
             curTime = reactor.monotonic()
             self.loop = reactor.register_timer(self.doChecks, curTime + self.updateTime)
 
-    def disableChecks(self):
+    def disableChecks(self, gcmd=None):
         if (self.loop != None):
             self.printer.get_reactor().unregister_timer(self.loop)
             self.loop = None

@@ -5,28 +5,30 @@
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
 import logging, chelper
-#from motion_report import DumpTrapQ
+
+def lerp(start, end, delta):
+    return (start + (end - start) * delta)
 
 class DriverHelper:
-    def __init__(self, name, driver, stepper, printer):
+    def __init__(self, sg, name, driver, stepper):
         self.name = name
-        self.printer = printer
+        self.printer = sg.printer
         self.driver = driver
         self.stepper = stepper
         self.history = None
         self.expectedRange = 25
         self.triggers = 0
         self.expectedPos = 0
-        self.trapq = None # trapezoidal velocity queue for stepper
+        self.trapq = stepper.get_trapq() if stepper else None # trapezoidal velocity queue for stepper
         self.lastVelocity = 0
 
-        self.deviationTolerance = 25
+        self.deviationTolerance = sg.deviationTolerance
 
     def check(self, eventtime, updateTime):
         last_move = self.getLastMove(eventtime)
         velocity = last_move.start_v + last_move.accel if last_move else 0
 
-        result = int(self..driver.mcu_tmc.get_register('SG_RESULT'))
+        result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
 
         if (self.history == None): self.history = result
 
@@ -34,12 +36,12 @@ class DriverHelper:
 
         difference = self.expectedPos - result
 
-        expectedDropRange = self.lerp(driverInfo.expectedRange, self.deviationTolerance, updateTime * 0.5)
+        expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
         if (self.lastVelocity != velocity): expectedDropRange = self.deviationTolerance * 2
             
         if (difference > expectedDropRange):
             self.triggers += 1
-            if (driverInfo.triggers > 10):
+            if (self.triggers > 10):
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (d,str(result),str(difference), str(expectedDropRange)))
         else:
             self.triggers = max(0, self.triggers - 1)
@@ -79,7 +81,6 @@ class StallGuardExtras:
     def __init__(self, config):
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
-        self.crashThreshold = int(config.get("crash_threshold", 25))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
         self.deviationTolerance = int(config.get("deviation_tolerance", 100))
@@ -119,7 +120,12 @@ class StallGuardExtras:
                 if ('extruder' in name):
                     self.extruders.append(obj)
                 else:
-                    self.drivers[name.split(" ")[1]] = DriverHelper(name, obj, stepper, printer)
+                    self.drivers[name.split(" ")[1]] = DriverHelper(
+                        self,
+                        name, 
+                        obj, 
+                        stepper[0] if len(stepper) else None, 
+                    )
                 logging.info("found stallguard compatible driver " + str(obj))
 
     def onMotorOff(self, eventtime):
@@ -136,12 +142,12 @@ class StallGuardExtras:
         self.enableChecks()
     
     def setupDrivers(self):
-        for name, driverDef in self.drivers:
+        for name, driverDef in self.drivers.items():
             driver = driverDef.driver
             # set drivers stallguard strength if specified
-            if (self.sgthrs != None and driverDef.driverHasField(driver, 'sgthrs')):
+            if (self.sgthrs != None and driverDef.driverHasField('sgthrs')):
                 driver.fields.set_field("sgthrs", int(self.sgthrs))
-            elif (self.sgt != None and driverDef.driverHasField(driver, 'sgt')):
+            elif (self.sgt != None and driverDef.driverHasField('sgt')):
                 driver.fields.set_field("sgt", int(self.sgt))
     
     # move the toolhead safely within printing speeds to finetune the stallguard settings
@@ -160,9 +166,6 @@ class StallGuardExtras:
         # SAVE_CONFIG
         configfile = self.printer.lookup_object('configfile')
         configfile.set('stallguardextras', 'sgthrs', '0')
-
-    def lerp(self, start, end, delta):
-        return (start + (end - start) * delta)
 
     def queryObjects(self, gcmd):
         gcmd.respond_info(str(self.printer.lookup_objects()))
@@ -196,8 +199,8 @@ class StallGuardExtras:
         # TODO: cleanup, force rehome on x and y when slipping, cant do anything with z though :(
         
         # driver
-        for name, driver in self.drivers:
-            driver.check(eventtime, self.updateTime):
+        for name, driver in self.drivers.items():
+            driver.check(eventtime, self.updateTime)
 
         return eventtime + self.updateTime
 

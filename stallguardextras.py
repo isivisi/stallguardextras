@@ -12,6 +12,7 @@ def lerp(start, end, delta):
 class DriverHelper:
     def __init__(self, sg, name, driver, stepper):
         self.name = name
+        self.sg = sg
         self.printer = sg.printer
         self.driver = driver
         self.stepper = stepper
@@ -46,8 +47,8 @@ class DriverHelper:
         if (difference > expectedDropRange and not standStillIndicator):
             self.triggers += 1
             if (self.triggers > 10):
-                logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
-                #self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
+                #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
+                self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
         else:
             self.triggers = max(0, self.triggers - 1)
         self.history = result
@@ -88,6 +89,7 @@ class StallGuardExtras:
         self.updateTime = float(config.get("update_time", 0.1))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
+        self.testMode = bool(config.get("test_mode", False))
         self.deviationTolerance = int(config.get("deviation_tolerance", 100))
         self.loop = None
 
@@ -102,10 +104,7 @@ class StallGuardExtras:
         gcode = self.printer.lookup_object("gcode")
         gcode.register_command("ENABLE_STALLGUARD_CHECKS", self.enableChecks, desc="")
         gcode.register_command("DISABLE_STALLGUARD_CHECKS", self.disableChecks, desc="")
-        gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
-        gcode.register_command("DEBUG_QUERY_OBJECTS", self.queryObjects, desc="")
         gcode.register_command("TUNE_STALLGUARD", self.tune, desc="")
-        gcode.register_command("DEBUG_MOVE", self.debugMove, desc="")
 
     def onKlippyConnect(self):
         #self.setupDrivers()

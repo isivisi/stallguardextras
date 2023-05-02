@@ -25,6 +25,10 @@ class DriverHelper:
         self.deviationTolerance = sg.deviationTolerance
 
     def check(self, eventtime, updateTime):
+        status = self.driver.get_status()
+        standStillIndicator = False
+        if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
+
         last_move = self.getLastMove(eventtime)
         velocity = last_move.start_v + last_move.accel if last_move else 0
 
@@ -39,10 +43,11 @@ class DriverHelper:
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
         if (self.lastVelocity != velocity): expectedDropRange = self.deviationTolerance * 2
             
-        if (difference > expectedDropRange):
+        if (difference > expectedDropRange and not standStillIndicator):
             self.triggers += 1
             if (self.triggers > 10):
-                self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (d,str(result),str(difference), str(expectedDropRange)))
+                logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
+                #self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
         else:
             self.triggers = max(0, self.triggers - 1)
         self.history = result

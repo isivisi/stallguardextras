@@ -21,6 +21,7 @@ class StallGuardExtras:
         self.crashThreshold = int(config.get("crash_threshold", 25))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
+        self.deviationTolerance = int(config.get("deviation_tolerance", 100))
         self.loop = None
 
         self.drivers = {}
@@ -160,8 +161,6 @@ class StallGuardExtras:
 
         # TODO: cleanup, force rehome on x and y when slipping, cant do anything with z though :(
         # TODO: deal with big transient spikes being set as expected, forcing failure
-
-        #velocity = self.printer.objects["motion_report"].get_status(eventtime)["live_velocity"]
         
         # driver
         for d in self.drivers:
@@ -170,14 +169,7 @@ class StallGuardExtras:
             last_move = self.getLastMove(driverInfo, eventtime)
             velocity = last_move.start_v + last_move.accel if last_move else 0
 
-            status = driverInfo["driver"].get_status()
-            
-            # driver.get_status mcu_phase_offset, phase_offset_position, run_current, hold_current
-
             result = int(driverInfo["driver"].mcu_tmc.get_register('SG_RESULT'))
-            standStillIndicator = True
-            if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
-            #actualMotorCurrent = status['drv_status']['cs_actual']
 
             if (driverInfo["history"] == None): driverInfo["history"] = result
 
@@ -185,13 +177,13 @@ class StallGuardExtras:
 
             difference = driverInfo["expectedPos"] - result
 
-            expectedDropRange = self.lerp(driverInfo["expectedRange"], 15, self.updateTime * 0.5)
-            if (self.lastVelocity != velocity): expectedDropRange = 100
+            expectedDropRange = self.lerp(driverInfo["expectedRange"], self.deviationTolerance, self.updateTime * 0.5)
+            if (self.lastVelocity != velocity): expectedDropRange = self.deviationTolerance * 2
             
-            if (difference > expectedDropRange and not standStillIndicator):
+            if (difference > expectedDropRange):
                 driverInfo["triggers"] += 1
                 if (driverInfo["triggers"] > 10):
-                    self.printer.invoke_shutdown("Detecting motor slip on motor %s" % (d,))
+                    self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (d,str(result),str(difference), str(expectedDropRange)))
             else:
                 driverInfo["triggers"] = max(0, driverInfo["triggers"] - 1)
             driverInfo["history"] = result

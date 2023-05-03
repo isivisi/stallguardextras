@@ -24,7 +24,7 @@ class DriverHelper:
         self.driver = driver
         self.stepper = stepper
         self.history = None
-        self.expectedRange = 50
+        self.expectedRange = sg.deviationTolerance
         self.triggers = 0
         self.expectedPos = 0
         self.trapq = stepper.get_trapq() if stepper else None # trapezoidal velocity queue for stepper
@@ -35,7 +35,9 @@ class DriverHelper:
         self.moving = False
         self.lastMicroStep = 0
 
-        self.deviationTolerance = 50 #sg.deviationTolerance
+        self.waitForChange = True
+
+        self.deviationTolerance = sg.deviationTolerance
 
     def check(self, eventtime, updateTime):
         status = self.driver.get_status()
@@ -49,7 +51,7 @@ class DriverHelper:
         steppos = self.stepper.get_commanded_position()
 
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
-        microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT'))
+        microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
 
         # determine if we've moved since last check
         if (microstepcounter != self.lastMicroStep and not self.moving):
@@ -73,12 +75,11 @@ class DriverHelper:
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
             
         if (difference > expectedDropRange):
-            #logging.warning("detecting slip %s/5" % (str(self.triggers,)))
             self.triggers += 1
             
-            #if (self.triggers <= 2):
-                #logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
-                #self.expectedPos = self.expectedPos - expectedDropRange #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
+            if (self.triggers <= 2):
+                logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
+                self.expectedPos = self.expectedPos - (expectedDropRange*1.5) #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 2):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))

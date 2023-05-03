@@ -22,6 +22,8 @@ class DriverHelper:
         self.expectedPos = 0
         self.trapq = stepper.get_trapq() if stepper else None # trapezoidal velocity queue for stepper
         self.lastVelocity = 0
+        self.lastStepPos = 0
+        self.smoothedResult = 0
 
         self.deviationTolerance = sg.deviationTolerance
 
@@ -32,8 +34,10 @@ class DriverHelper:
 
         last_move = self.getLastMove(eventtime)
         velocity = last_move.start_v + last_move.accel if last_move else 0
+        steppos = self.stepper.get_commanded_position()
 
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
+        self.smoothedResult = lerp(self.smoothedResult, result, updateTime * 0.5)
 
         if (standStillIndicator):
             self.triggers = 0
@@ -42,18 +46,20 @@ class DriverHelper:
 
         if (self.history == None): self.history = result
 
-        if (velocity != self.lastVelocity): self.expectedPos = result
-
         difference = self.expectedPos - result
 
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
-        if (self.lastVelocity != velocity): expectedDropRange = self.deviationTolerance * 2
+
+        if (self.lastVelocity != velocity or steppos != self.lastStepPos):
+            self.expectedPos = result
+            #expectedDropRange = self.deviationTolerance * 2
             
         if (difference > expectedDropRange):
+            #logging.warning("detecting slip %s/5" % (str(self.triggers,)))
             self.triggers += 1
             if (self.triggers <= 2):
                 logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
-                self.expectedPos = lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
+                self.expectedPos = self.expectedPos - expectedDropRange #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 2):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
@@ -63,10 +69,11 @@ class DriverHelper:
         self.expectedRange = expectedDropRange
 
         self.lastVelocity = velocity
+        self.lastStepPos = steppos
 
     def getStatus(self):
         return {
-            "sg_result": self.history,
+            "sg_result": self.smoothedResult,
             "sg_expected": self.expectedPos,
             "sg_triggers": self.triggers,
         }
@@ -113,6 +120,7 @@ class StallGuardExtras:
         gcode.register_command("ENABLE_STALLGUARD_CHECKS", self.enableChecks, desc="")
         gcode.register_command("DISABLE_STALLGUARD_CHECKS", self.disableChecks, desc="")
         gcode.register_command("TUNE_STALLGUARD", self.tune, desc="")
+        gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
 
     def onKlippyConnect(self):
         #self.setupDrivers()
@@ -187,7 +195,12 @@ class StallGuardExtras:
         #gcmd.respond_info(str(self.drivers))
         responses = {}
         for name in self.drivers:
-            responses[name] = int(self.drivers[name]["driver"].mcu_tmc.get_register('SG_RESULT'))
+            last_move = self.drivers[name].getLastMove(self.printer.get_reactor().monotonic())
+            responses[name] = {
+                "result": int(self.drivers[name].driver.mcu_tmc.get_register('SG_RESULT')),
+                "velocity": last_move.start_v + last_move.accel if last_move else 0,
+                "mcu_pos": self.drivers[name].stepper.get_commanded_position()
+            }
         gcmd.respond_info(str(responses))
 
     def enableChecks(self, gcmd=None):

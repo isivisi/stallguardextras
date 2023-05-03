@@ -1,6 +1,10 @@
 # Stall Guard Extras
 A simple klipper plugin that queries for stall guard warnings
 
+# Limitations
+Currently does not play well with bed mesh
+
+
 ## Config
 ```
 [stallguardextras]

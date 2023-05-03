@@ -55,7 +55,6 @@ class DriverHelper:
         if (standStillIndicator):
             self.triggers = 0
             self.expectedPos = result
-            return
 
         if (self.history == None): self.history = result
 

@@ -25,7 +25,7 @@ class DriverHelper:
         self.stepper = stepper
         self.history = None
         self.expectedRange = 50
-        self.timeTriggered = 0
+        self.triggers = 0
         self.expectedPos = 0
         self.trapq = stepper.get_trapq() if stepper else None # trapezoidal velocity queue for stepper
         self.lastVelocity = 0
@@ -60,7 +60,7 @@ class DriverHelper:
             self.moving = False
         
         if (standStillIndicator):
-            self.timeTriggered = 0
+            self.triggers = 0
             self.expectedPos = result
 
         if (self.history == None): self.history = result
@@ -73,17 +73,17 @@ class DriverHelper:
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
             
         if (difference > expectedDropRange):
-            #logging.warning("detecting slip %s/5" % (str(self.timeTriggered,)))
-            self.timeTriggered += updateTime
+            #logging.warning("detecting slip %s/5" % (str(self.triggers,)))
+            self.triggers += 1
             
-            #if (self.timeTriggered <= 2):
+            #if (self.triggers <= 2):
                 #logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
                 #self.expectedPos = self.expectedPos - expectedDropRange #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
-            if (self.timeTriggered > 0.5):
+            if (self.triggers > 2):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
         else:
-            self.timeTriggered = 0 # max(0, self.timeTriggered - 1)
+            self.triggers = max(0, self.triggers - 1)
         self.history = result
         self.expectedRange = expectedDropRange
 
@@ -95,7 +95,7 @@ class DriverHelper:
         return {
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
-            "sg_triggers": self.timeTriggered,
+            "sg_triggers": self.triggers,
         }
 
     def getLastMove(self, eventtime):

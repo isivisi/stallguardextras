@@ -6,6 +6,13 @@
 
 import logging, chelper
 
+supportedDrivers = [
+    'TMC2130',
+    'TMC2209',
+    'TMC2660',
+    'TMC5160',
+]
+
 def lerp(start, end, delta):
     return (start + (end - start) * delta)
 
@@ -17,8 +24,8 @@ class DriverHelper:
         self.driver = driver
         self.stepper = stepper
         self.history = None
-        self.expectedRange = 25
-        self.triggers = 0
+        self.expectedRange = 50
+        self.timeTriggered = 0
         self.expectedPos = 0
         self.trapq = stepper.get_trapq() if stepper else None # trapezoidal velocity queue for stepper
         self.lastVelocity = 0
@@ -28,7 +35,7 @@ class DriverHelper:
         self.moving = False
         self.lastMicroStep = 0
 
-        self.deviationTolerance = sg.deviationTolerance
+        self.deviationTolerance = 50 #sg.deviationTolerance
 
     def check(self, eventtime, updateTime):
         status = self.driver.get_status()
@@ -53,30 +60,30 @@ class DriverHelper:
             self.moving = False
         
         if (standStillIndicator):
-            self.triggers = 0
+            self.timeTriggered = 0
             self.expectedPos = result
 
         if (self.history == None): self.history = result
 
-        difference = self.expectedPos - result
-
-        expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
-
-        if (microstepcounter != self.lastMicroStep or movingChangedThisTick): #if (self.lastVelocity != velocity or steppos != self.lastStepPos):
+        if (movingChangedThisTick or self.lastVelocity != velocity or steppos != self.lastStepPos): #if (self.lastVelocity != velocity or steppos != self.lastStepPos):
             self.expectedPos = result
-            #expectedDropRange = self.deviationTolerance * 2
+            #self.expectedRange = self.deviationTolerance * 2
+
+        difference = self.expectedPos - result
+        expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
             
         if (difference > expectedDropRange):
-            #logging.warning("detecting slip %s/5" % (str(self.triggers,)))
-            self.triggers += 1
-            if (self.triggers <= 2):
-                logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
+            #logging.warning("detecting slip %s/5" % (str(self.timeTriggered,)))
+            self.timeTriggered += updateTime
+            
+            #if (self.timeTriggered <= 2):
+                #logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
                 #self.expectedPos = self.expectedPos - expectedDropRange #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
-            if (self.triggers > 2):
+            if (self.timeTriggered > 0.5):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
         else:
-            self.triggers = max(0, self.triggers - 1)
+            self.timeTriggered = 0 # max(0, self.timeTriggered - 1)
         self.history = result
         self.expectedRange = expectedDropRange
 
@@ -88,7 +95,7 @@ class DriverHelper:
         return {
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
-            "sg_triggers": self.triggers,
+            "sg_triggers": self.timeTriggered,
         }
 
     def getLastMove(self, eventtime):
@@ -105,13 +112,6 @@ class DriverHelper:
         return field in self.driver.fields.field_to_register.keys()
 
 class StallGuardExtras:
-    supportedDrivers = [
-        'TMC2130',
-        'TMC2209',
-        'TMC2660',
-        'TMC5160',
-    ]
-    
     def __init__(self, config):
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
@@ -134,6 +134,8 @@ class StallGuardExtras:
         gcode.register_command("DISABLE_STALLGUARD_CHECKS", self.disableChecks, desc="")
         gcode.register_command("TUNE_STALLGUARD", self.tune, desc="")
         gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
+        
+        #extruderSensing = ExtruderDetection(config.getsection('extruder_detection'))
 
     def onKlippyConnect(self):
         #self.setupDrivers()
@@ -147,7 +149,7 @@ class StallGuardExtras:
 
         # find all compatable drivers
         for name, obj in self.printer.lookup_objects():
-            if any(driver.lower() in name.lower() for driver in self.supportedDrivers):
+            if any(driver.lower() in name.lower() for driver in supportedDrivers):
                 stepper = [s for s in steppers if s.get_name() == name.split(" ")[1]]
                 logging.info("%s found %s" % (name, str(stepper)))
                 if ('extruder' in name):
@@ -246,6 +248,13 @@ class StallGuardExtras:
         for d in self.drivers:
             data[d] = self.drivers[d].getStatus()
         return data
+
+class ExtruderDetection:
+    def __init__(self, config):
+        self.printer = config.get_printer()
+        self.updateTime = float(config.get("update_time", 0.1))
+        self.jamDetectEnabled = bool(config.get("jam_detect", False))
+        self.runoutDetect = bool(config.get("runout_detect", False))
 
 def load_config(config):
     return StallGuardExtras(config)

@@ -25,6 +25,9 @@ class DriverHelper:
         self.lastStepPos = 0
         self.smoothedResult = 0
 
+        self.moving = False
+        self.lastMicroStep = 0
+
         self.deviationTolerance = sg.deviationTolerance
 
     def check(self, eventtime, updateTime):
@@ -32,13 +35,23 @@ class DriverHelper:
         standStillIndicator = False
         if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
 
+        movingChangedThisTick = False
+
         last_move = self.getLastMove(eventtime)
         velocity = last_move.start_v + last_move.accel if last_move else 0
         steppos = self.stepper.get_commanded_position()
 
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
-        self.smoothedResult = lerp(self.smoothedResult, result, updateTime * 0.5)
+        microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT'))
 
+        # determine if we've moved since last check
+        if (microstepcounter != self.lastMicroStep and not self.moving):
+            movingChangedThisTick = True
+            self.moving = True
+        elif (microstepcounter == self.lastMicroStep and self.moving):
+            movingChangedThisTick = True
+            self.moving = False
+        
         if (standStillIndicator):
             self.triggers = 0
             self.expectedPos = result
@@ -50,7 +63,7 @@ class DriverHelper:
 
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
 
-        if (self.lastVelocity != velocity or steppos != self.lastStepPos):
+        if (microstepcounter != self.lastMicroStep or movingChangedThisTick): #if (self.lastVelocity != velocity or steppos != self.lastStepPos):
             self.expectedPos = result
             #expectedDropRange = self.deviationTolerance * 2
             
@@ -59,7 +72,7 @@ class DriverHelper:
             self.triggers += 1
             if (self.triggers <= 2):
                 logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
-                self.expectedPos = self.expectedPos - expectedDropRange #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
+                #self.expectedPos = self.expectedPos - expectedDropRange #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 2):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
@@ -70,10 +83,11 @@ class DriverHelper:
 
         self.lastVelocity = velocity
         self.lastStepPos = steppos
+        self.lastMicroStep = microstepcounter
 
     def getStatus(self):
         return {
-            "sg_result": self.smoothedResult,
+            "sg_result": self.history,
             "sg_expected": self.expectedPos,
             "sg_triggers": self.triggers,
         }
@@ -198,8 +212,7 @@ class StallGuardExtras:
             last_move = self.drivers[name].getLastMove(self.printer.get_reactor().monotonic())
             responses[name] = {
                 "result": int(self.drivers[name].driver.mcu_tmc.get_register('SG_RESULT')),
-                "velocity": last_move.start_v + last_move.accel if last_move else 0,
-                "mcu_pos": self.drivers[name].stepper.get_commanded_position()
+                "microstepcounter": int(self.drivers[name].driver.mcu_tmc.get_register('MSCNT'))
             }
         gcmd.respond_info(str(responses))
 

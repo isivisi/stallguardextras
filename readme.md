@@ -1,7 +1,9 @@
 # Stall Guard Extras
 A simple klipper plugin that queries for stall guard warnings
 
-# Testing imitations
+# WIP!
+
+# Testing limitations
 This has only been tested on TMC2209 drivers
 
 ## Config

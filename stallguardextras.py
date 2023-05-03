@@ -67,7 +67,8 @@ class DriverHelper:
 
         if (self.history == None): self.history = result
 
-        if (movingChangedThisTick or self.lastVelocity != velocity or steppos != self.lastStepPos): #if (self.lastVelocity != velocity or steppos != self.lastStepPos):
+        if (movingChangedThisTick or self.lastVelocity != velocity or steppos != self.lastStepPos): #(movingChangedThisTick or self.lastVelocity != velocity or steppos != self.lastStepPos):
+            self.triggers = 0
             self.expectedPos = result
             #self.expectedRange = self.deviationTolerance * 2
 
@@ -79,12 +80,12 @@ class DriverHelper:
             
             if (self.triggers <= 2):
                 logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
-                self.expectedPos = self.expectedPos - (expectedDropRange*1.5) #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
+                #self.expectedPos = self.expectedPos - (difference*1.2) #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 2):
                 #if self.sg.testMode: logging.warning("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
         else:
-            self.triggers = max(0, self.triggers - 1)
+            self.triggers = max(0, self.triggers - updateTime)
         self.history = result
         self.expectedRange = expectedDropRange
 

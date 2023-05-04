@@ -39,6 +39,19 @@ class DriverHelper:
 
         self.deviationTolerance = sg.deviationTolerance
 
+    # Perform some checks using the stallguard result to determine if the motor is 
+    # slipping / about to slip.
+    #
+    # The default method is defining a threshold for the stallguard value to go below,
+    # and checking fi it does. This only seems to work at one set speed.
+    #
+    # I try to dynamically set the threshold for different movements by determing when
+    # the motor will change momentum / change to a different move. Then grab the sg value,
+    # wait to see if it deviates and assume stalled if it does.
+    #
+    # works great except I need to find a better way to determine when the specifc motor is
+    # to change momentum. sometimes the motor changes to a different, but consistent
+    # value and its not picking up on that.
     def check(self, eventtime, updateTime):
         status = self.driver.get_status()
         standStillIndicator = False
@@ -60,6 +73,11 @@ class DriverHelper:
         elif (microstepcounter == self.lastMicroStep and self.moving):
             movingChangedThisTick = True
             self.moving = False
+        elif (microstepcounter < self.lastMicroStep):
+            movingChangedThisTick = abs((microstepcounter + 1023) - self.lastMicrostep) > 500
+        else:
+            movingChangedThisTick = abs(microstepcounter - self.lastMicrostep) > 500
+            
         
         if (standStillIndicator):
             self.triggers = 0

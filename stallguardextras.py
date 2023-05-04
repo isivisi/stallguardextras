@@ -36,7 +36,7 @@ class DriverHelper:
         self.lastMicroStep = 0
         self.lastMove = None
 
-        self.waitForChange = True
+        self.lastChanged = True
 
         self.deviationTolerance = sg.deviationTolerance
 
@@ -60,8 +60,8 @@ class DriverHelper:
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
 
         if (standStillIndicator):
-            self.triggers = 0
             self.expectedPos = result
+            self.triggers = 0
 
         if (self.history == None): self.history = result
 
@@ -70,23 +70,30 @@ class DriverHelper:
         #    self.expectedPos = result
             #self.expectedRange = self.deviationTolerance * 2
 
+        self.hasChanged = True if self.hasMovementChanged(eventtime) else self.hasChanged
+
         difference = self.expectedPos - result
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
             
         if (abs(difference) > expectedDropRange):
-
             self.triggers += updateTime
+
+            if (self.hasChanged):
+                self.expectedPos = result
+                self.triggers = 0
+                self.hasChanged = False
                 
             #if (self.triggers <= 1):
             #    logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
             #    self.expectedPos = self.expectedPos - difference #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
-            if (self.triggers > 0.25):
-                if (not self.hasMovementChanged(eventtime)):
+            if (self.triggers > 0.1):
+                if (not self.hasChanged):
                     self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 else:
                     logging.warning("slip ignored, intended change")
                     self.expectedPos = result
                     self.triggers = 0
+                    self.hasChanged = False
         else:
             self.triggers = max(0, self.triggers - updateTime)
         self.history = result

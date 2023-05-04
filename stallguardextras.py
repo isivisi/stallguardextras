@@ -36,7 +36,7 @@ class DriverHelper:
         self.lastMicroStep = 0
         self.lastMove = None
 
-        self.lastChanged = True
+        self.hasChanged = True
 
         self.deviationTolerance = sg.deviationTolerance
 
@@ -78,10 +78,10 @@ class DriverHelper:
         if (abs(difference) > expectedDropRange):
             self.triggers += updateTime
 
-            if (self.hasChanged):
-                self.expectedPos = result
-                self.triggers = 0
-                self.hasChanged = False
+            #if (self.hasChanged):
+                #self.expectedPos = result
+                #self.triggers = 0
+                #self.hasChanged = False
                 
             #if (self.triggers <= 1):
             #    logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
@@ -90,7 +90,7 @@ class DriverHelper:
                 if (not self.hasChanged):
                     self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 else:
-                    logging.warning("slip ignored, intended change")
+                    logging.warning("%s slip ignored, intended change" % (self.name,))
                     self.expectedPos = result
                     self.triggers = 0
                     self.hasChanged = False
@@ -102,16 +102,16 @@ class DriverHelper:
     def hasMovementChanged(self, eventtime):
         movingChangedThisTick = False
 
-        last_move = self.getLastMove(eventtime)
-        velocity = last_move.start_v + last_move.accel if last_move else 0
+        #last_move = self.getLastMove(eventtime)
+        #velocity = last_move.start_v + last_move.accel if last_move else 0
         #movingChangedThisTick = self.lastVelocity != velocity
 
         #steppos = self.lastStepPos
         #if (self.getStartPosOfLastMove(eventtime)):
-        steppos = self.stepper.get_commanded_position()
+        #steppos = self.stepper.get_commanded_position()
         #movingChangedThisTick = steppos != self.lastStepPos
 
-        microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
+        #microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
 
         # testing new thing
         move = self.getMove(eventtime)
@@ -119,16 +119,16 @@ class DriverHelper:
             if (move.first_clock >= self.lastMove.last_clock):
                 movingChangedThisTick = True
 
-        if (microstepcounter != self.lastMicroStep and not self.moving):
-            movingChangedThisTick = True
-            self.moving = True
-        elif (microstepcounter == self.lastMicroStep and self.moving):
-            movingChangedThisTick = True
-            self.moving = False
+        #if (microstepcounter != self.lastMicroStep and not self.moving):
+        #    movingChangedThisTick = True
+        #    self.moving = True
+        #elif (microstepcounter == self.lastMicroStep and self.moving):
+        #    movingChangedThisTick = True
+        #    self.moving = False
 
-        self.lastVelocity = velocity
-        self.lastStepPos = steppos
-        self.lastMicroStep = microstepcounter
+        #self.lastVelocity = velocity
+        #self.lastStepPos = steppos
+        #self.lastMicroStep = microstepcounter
         self.lastMove = move
 
         return movingChangedThisTick

@@ -118,6 +118,13 @@ class DriverHelper:
             "sg_triggers": self.triggers,
         }
 
+    # grab specifically just the start_position of the most recent move we are sending to the mcu
+    def getStartPosOfLastMove(self, eventtime):
+        if (not self.stepper): return
+        # first_clock, last_clock, start_position, step_count, interval, add
+        steps, count = self.stepper.dump_steps(1, eventtime, eventtime)
+        return steps[count].start_position
+
     def getLastMove(self, eventtime):
         print_time = self.printer.lookup_object('mcu').estimated_print_time(eventtime)
         ffi_main, ffi_lib = chelper.get_ffi()

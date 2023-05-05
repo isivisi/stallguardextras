@@ -16,6 +16,16 @@ supportedDrivers = [
 def lerp(start, end, delta):
     return (start + (end - start) * delta)
 
+# copy c struct data
+class MoveHelper:
+    def __init__(self, rawMove):
+        self.first_clock = rawMove.first_clock
+        self.last_clock = rawMove.last_clock
+        self.start_position = rawMove.start_position
+        self.step_count = rawMove.step_count
+        self.interval = rawMove.interval
+        self.add = rawMove.add
+
 class DriverHelper:
     def __init__(self, sg, name, driver, stepper):
         self.name = name
@@ -31,6 +41,8 @@ class DriverHelper:
         self.lastVelocity = 0
         self.lastStepPos = 0
         self.smoothedResult = 0
+
+        #self.enableChecks = bool(sg.config.getsection(self.name).get('check_collisions', True))
 
         self.moving = False
         self.lastMicroStep = 0
@@ -69,8 +81,10 @@ class DriverHelper:
         #    self.triggers = 0
         #    self.expectedPos = result
             #self.expectedRange = self.deviationTolerance * 2
-
-        self.hasChanged = True if self.hasMovementChanged(eventtime) else self.hasChanged
+        
+        # movement changed
+        changedThisTick = self.hasMovementChanged(eventtime)
+        self.hasChanged = True if changedThisTick else self.hasChanged
 
         difference = self.expectedPos - result
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
@@ -78,11 +92,6 @@ class DriverHelper:
         if (abs(difference) > expectedDropRange):
             self.triggers += updateTime
 
-            #if (self.hasChanged):
-                #self.expectedPos = result
-                #self.triggers = 0
-                #self.hasChanged = False
-                
             #if (self.triggers <= 1):
             #    logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
             #    self.expectedPos = self.expectedPos - difference #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
@@ -95,46 +104,54 @@ class DriverHelper:
                     self.triggers = 0
                     self.hasChanged = False
         else:
-            self.triggers = max(-1.0, self.triggers - updateTime)
+            self.triggers = max(-0.1 if self.hasChanged else 0, self.triggers - updateTime)
+
+            #if (changedThisTick):
+            #    logging.warning("%s move identified without change" % (self.name,))
+            #    self.expectedPos = result
+            #    self.triggers = 0
+            #    self.hasChanged = False
+
+        if (self.triggers <= -0.1):
+            logging.warning("%s expected change detected")
+            self.triggers = 0
+            self.hasChanged = False
+
         self.history = result
         self.expectedRange = expectedDropRange
-
-        if (self.hasChanged and self.triggers <= -0.1):
-                self.expectedPos = result
-                self.triggers = 0
-                self.hasChanged = False
 
     def hasMovementChanged(self, eventtime):
         movingChangedThisTick = False
 
-        #last_move = self.getLastMove(eventtime)
-        #velocity = last_move.start_v + last_move.accel if last_move else 0
+        last_move = self.getLastMove(eventtime)
+        velocity = last_move.start_v + last_move.accel if last_move else 0
         #movingChangedThisTick = self.lastVelocity != velocity
 
-        #steppos = self.lastStepPos
-        #if (self.getStartPosOfLastMove(eventtime)):
-        #steppos = self.stepper.get_commanded_position()
+        steppos = self.lastStepPos
+        steppos = self.stepper.get_commanded_position()
         #movingChangedThisTick = steppos != self.lastStepPos
 
-        #microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
+        microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
 
         # testing new thing
         move = self.getMove(eventtime)
         if (move and self.lastMove):
-            if (move.first_clock >= self.lastMove.last_clock):
+            if (move.start_position > 0 and self.lastMove.start_position > 0 
+            and move.start_position != self.lastMove.start_position):
+                logging.warning("%s, %s" % (move.first_clock, self.lastMove.first_clock))
                 movingChangedThisTick = True
 
-        #if (microstepcounter != self.lastMicroStep and not self.moving):
-        #    movingChangedThisTick = True
-        #    self.moving = True
-        #elif (microstepcounter == self.lastMicroStep and self.moving):
-        #    movingChangedThisTick = True
-        #    self.moving = False
+        if (microstepcounter != self.lastMicroStep and not self.moving):
+            #movingChangedThisTick = True
+            self.moving = True
+        elif (microstepcounter == self.lastMicroStep and self.moving):
+            #movingChangedThisTick = True
+            self.moving = False
 
-        #self.lastVelocity = velocity
-        #self.lastStepPos = steppos
-        #self.lastMicroStep = microstepcounter
-        self.lastMove = move
+        self.lastVelocity = velocity
+        self.lastStepPos = steppos
+        self.lastMicroStep = microstepcounter
+        self.lastMove = move if move else self.lastMove
 
         return movingChangedThisTick
 
@@ -150,9 +167,9 @@ class DriverHelper:
         if (not self.stepper): return None
         clock = self.stepper.get_mcu().print_time_to_clock(eventtime)
         # first_clock, last_clock, start_position, step_count, interval, add
-        steps, count = self.stepper.dump_steps(1, 0, 1<<63)
+        steps, count = self.stepper.dump_steps(1, 0, clock)
         if not steps: return None
-        return steps[0]
+        return MoveHelper(steps[0])
 
     def getLastMove(self, eventtime):
         print_time = self.printer.lookup_object('mcu').estimated_print_time(eventtime)
@@ -171,6 +188,7 @@ class CollisionDetection:
     def __init__(self, config):
         if (not config):
             return
+        self.config = config
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
         self.sgthrs = config.get("sgthrs", None)
@@ -223,12 +241,6 @@ class CollisionDetection:
 
     def onMotorOff(self, eventtime):
         self.disableChecks()
-
-        #with open("stallout.csv", "w") as txt_file:
-        #    for line in self.csv:
-        #        txt_file.write(line + "\n")
-        
-        #self.csv = []
 
     def onMotorOn(self, eventtime):
         self.setupDrivers()

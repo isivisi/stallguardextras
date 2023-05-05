@@ -136,9 +136,8 @@ class DriverHelper:
         # testing new thing
         move = self.getMove(eventtime)
         if (move and self.lastMove):
-            if (move.start_position > 0 and self.lastMove.start_position > 0 
-            and move.start_position != self.lastMove.start_position):
-                logging.warning("%s, %s" % (move.first_clock, self.lastMove.first_clock))
+            if (move.first_clock != self.lastMove.first_clock):
+                logging.warning("%s, %s" % (move.first_clock, self.lastMove.last_clock))
                 movingChangedThisTick = True
 
         if (microstepcounter != self.lastMicroStep and not self.moving):
@@ -151,7 +150,7 @@ class DriverHelper:
         self.lastVelocity = velocity
         self.lastStepPos = steppos
         self.lastMicroStep = microstepcounter
-        self.lastMove = move if move else self.lastMove
+        self.lastMove = move
 
         return movingChangedThisTick
 

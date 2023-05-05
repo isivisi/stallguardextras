@@ -167,14 +167,16 @@ class DriverHelper:
     def driverHasField(self, field):
         return field in self.driver.fields.field_to_register.keys()
 
-class StallGuardExtras:
+class CollisionDetection:
     def __init__(self, config):
+        if (not config):
+            return
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
         self.testMode = bool(config.get("test_mode", False))
-        self.deviationTolerance = int(config.get("deviation_tolerance", 100))
+        self.deviationTolerance = int(config.get("deviation_tolerance", 50))
         self.loop = None
 
         self.drivers = {}
@@ -190,8 +192,8 @@ class StallGuardExtras:
         gcode.register_command("DISABLE_STALLGUARD_CHECKS", self.disableChecks, desc="")
         gcode.register_command("TUNE_STALLGUARD", self.tune, desc="")
         gcode.register_command("DEBUG_STALLGUARD", self.debug, desc="")
-        
-        #extruderSensing = ExtruderDetection(config.getsection('extruder_detection'))
+
+        self.printer.add_object("collision_detection", self)
 
     def onKlippyConnect(self):
         #self.setupDrivers()
@@ -256,7 +258,7 @@ class StallGuardExtras:
 
         # SAVE_CONFIG
         configfile = self.printer.lookup_object('configfile')
-        configfile.set('stallguardextras', 'sgthrs', '0')
+        configfile.set('collision_detection', 'sgthrs', '0')
 
     def queryObjects(self, gcmd):
         gcmd.respond_info(str(self.printer.lookup_objects()))
@@ -288,7 +290,6 @@ class StallGuardExtras:
         move = self.getLastMove(self.printer.get_reactor().monotonic())
         gcmd.respond_info("start_v:%s, move_t:%s, accel:%s\nx_r:%s x_y:%s x_z:%s" % (str(move.start_v), str(move.move_t), str(move.accel), str(move.x_r), str(move.y_r), str(move.z_r)))
     
-    lastVelocity = 0
     def doChecks(self, eventtime):
 
         # TODO: cleanup, force rehome on x and y when slipping, cant do anything with z though :(
@@ -307,10 +308,17 @@ class StallGuardExtras:
 
 class ExtruderDetection:
     def __init__(self, config):
+        if (not config):
+            return
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
         self.jamDetectEnabled = bool(config.get("jam_detect", False))
         self.runoutDetect = bool(config.get("runout_detect", False))
+
+class StallGuardExtras:
+    def __init__(self, config):
+        self.collisionDection = CollisionDetection(config.getsection('collision_detection'))
+        self.extruderSensing = ExtruderDetection(config.getsection('extruder_detection'))
 
 def load_config(config):
     return StallGuardExtras(config)

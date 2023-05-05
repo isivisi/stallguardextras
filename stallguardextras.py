@@ -95,9 +95,14 @@ class DriverHelper:
                     self.triggers = 0
                     self.hasChanged = False
         else:
-            self.triggers = max(0, self.triggers - updateTime)
+            self.triggers = max(-1.0, self.triggers - updateTime)
         self.history = result
         self.expectedRange = expectedDropRange
+
+        if (self.hasChanged and self.triggers <= -0.1):
+                self.expectedPos = result
+                self.triggers = 0
+                self.hasChanged = False
 
     def hasMovementChanged(self, eventtime):
         movingChangedThisTick = False

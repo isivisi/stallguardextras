@@ -16,7 +16,7 @@ supportedDrivers = [
 def lerp(start, end, delta):
     return (start + (end - start) * delta)
 
-# copy c struct data
+# copy of c struct data
 class MoveHelper:
     def __init__(self, rawMove):
         self.first_clock = rawMove.first_clock
@@ -104,7 +104,7 @@ class DriverHelper:
                     self.triggers = 0
                     self.hasChanged = False
         else:
-            self.triggers = max(-0.1 if self.hasChanged else 0, self.triggers - updateTime)
+            self.triggers = max(0, self.triggers - updateTime)
 
             #if (changedThisTick):
             #    logging.warning("%s move identified without change" % (self.name,))
@@ -135,12 +135,15 @@ class DriverHelper:
 
         # testing new thing
         move = self.getMove(eventtime)
+        clock = self.stepper.get_mcu().print_time_to_clock(eventtime)
         if (move and self.lastMove):
             if (move.first_clock != self.lastMove.first_clock and not self.moving):
                 movingChangedThisTick = True
                 self.moving = True
                 logging.warning("movement started")
-            elif (move.first_clock == self.lastMove.first_clock and self.moving):
+            elif (move.first_clock == self.lastMove.first_clock
+            and clock >= self.lastMove.last_clock
+            and self.moving):
                 movingChangedThisTick = True
                 self.moving = False
                 logging.warning("movement stopped")
@@ -200,7 +203,10 @@ class CollisionDetection:
         self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
 
         self.printer.register_event_handler("stepper_enable:motor_off", self.onMotorOff)
-        self.printer.register_event_handler("homing:homing_move_begin", self.onMotorOn)
+        self.printer.register_event_handler("homing:homing_move_begin", self.onHomingOn)
+        self.printer.register_event_handler("homing:homing_move_end", self.onHomingOff)
+        self.printer.register_event_handler("homing:home_rails_begin", self.onHomingOn)
+        self.printer.register_event_handler("homing:home_rails_end", self.onHomingOff)
 
         gcode = self.printer.lookup_object("gcode")
         gcode.register_command("ENABLE_STALLGUARD_CHECKS", self.enableChecks, desc="")
@@ -239,7 +245,10 @@ class CollisionDetection:
     def onMotorOff(self, eventtime):
         self.disableChecks()
 
-    def onMotorOn(self, eventtime):
+    def onHomingOn(self, *args):
+        self.disableChecks()
+    
+    def onHomingOff(self, *args):
         self.setupDrivers()
         self.enableChecks()
     

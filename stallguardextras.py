@@ -104,7 +104,7 @@ class DriverHelper:
                     self.triggers = 0
                     self.hasChanged = False
         else:
-            self.triggers = max(0, self.triggers - updateTime)
+            self.triggers = max(-0.1 if self.hasChanged else 0, self.triggers - updateTime)
 
             #if (changedThisTick):
             #    logging.warning("%s move identified without change" % (self.name,))
@@ -113,7 +113,7 @@ class DriverHelper:
             #    self.hasChanged = False
 
         if (self.triggers <= -0.1):
-            logging.warning("%s expected change detected")
+            logging.warning("%s expected change detected" % (self.name,))
             self.triggers = 0
             self.hasChanged = False
 
@@ -135,23 +135,27 @@ class DriverHelper:
 
         # testing new thing
         move = self.getMove(eventtime)
-        clock = self.stepper.get_mcu().print_time_to_clock(eventtime)
+        clock = self.stepper.get_mcu().print_time_to_clock(self.stepper.get_mcu().estimated_print_time(eventtime))
         if (move and self.lastMove):
             if (move.first_clock != self.lastMove.first_clock and not self.moving):
                 movingChangedThisTick = True
                 self.moving = True
-                logging.warning("movement started")
-            elif (move.first_clock == self.lastMove.first_clock
-            and clock >= self.lastMove.last_clock
+                #logging.warning("movement started")
+            elif (clock >= self.lastMove.last_clock
             and self.moving):
                 movingChangedThisTick = True
                 self.moving = False
-                logging.warning("movement stopped")
-
+                #logging.warning("movement stopped %s %s" % (clock, self.lastMove.last_clock))
+                if (move.first_clock != self.lastMove.first_clock):
+                    self.lastMove = move
+                    self.moving = True
+                    #logging.warning("movement started")
+        else:
+            self.lastMove = move
         self.lastVelocity = velocity
         self.lastStepPos = steppos
         self.lastMicroStep = microstepcounter
-        self.lastMove = move
+        #self.lastMove = move
 
         return movingChangedThisTick
 

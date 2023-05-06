@@ -26,6 +26,16 @@ class MoveHelper:
         self.interval = rawMove.interval
         self.add = rawMove.add
 
+    def getStatus(self):
+        return {
+            "first_clock": self.first_clock,
+            "last_clock": self.last_clock,
+            "start_position": self.start_position,
+            "step_count": self.step_count,
+            "interval": self.interval,
+            "add": self.add,
+        }
+
 class DriverHelper:
     def __init__(self, sg, name, driver, stepper):
         self.name = name
@@ -51,6 +61,12 @@ class DriverHelper:
         self.hasChanged = True
 
         self.deviationTolerance = sg.deviationTolerance
+
+    
+    def onEnabled(self):
+        self.moving = False
+        self.lastMove = None
+        self.hasChanged = True
 
     # Perform some checks using the stallguard result to determine if the motor is 
     # slipping / about to slip.
@@ -132,6 +148,12 @@ class DriverHelper:
         #movingChangedThisTick = steppos != self.lastStepPos
 
         microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
+        if (microstepcounter != self.lastMicroStep and not self.moving):
+            movingChangedThisTick = True
+            self.moving = True
+        elif (microstepcounter == self.lastMicroStep and self.moving):
+            movingChangedThisTick = True
+            self.moving = False
 
         # testing new thing
         move = self.getMove(eventtime)
@@ -164,6 +186,7 @@ class DriverHelper:
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
             "sg_triggers": self.triggers,
+            "latest_move": self.lastMove.getStatus() if self.lastMove else None
         }
 
     # grab specifically just the start_position of the most recent move we are sending to the mcu
@@ -195,6 +218,7 @@ class CollisionDetection:
         self.config = config
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
+        self.disableOnHome = False #bool(config.get("disable_on_home", True))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
         self.testMode = bool(config.get("test_mode", False))
@@ -207,10 +231,12 @@ class CollisionDetection:
         self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
 
         self.printer.register_event_handler("stepper_enable:motor_off", self.onMotorOff)
-        self.printer.register_event_handler("homing:homing_move_begin", self.onHomingOn)
-        self.printer.register_event_handler("homing:homing_move_end", self.onHomingOff)
-        self.printer.register_event_handler("homing:home_rails_begin", self.onHomingOn)
-        self.printer.register_event_handler("homing:home_rails_end", self.onHomingOff)
+        
+        if (self.disableOnHome):
+            self.printer.register_event_handler("homing:homing_move_begin", self.onHomingOn)
+            self.printer.register_event_handler("homing:homing_move_end", self.onHomingOff)
+            self.printer.register_event_handler("homing:home_rails_begin", self.onHomingOn)
+            self.printer.register_event_handler("homing:home_rails_end", self.onHomingOff)
 
         gcode = self.printer.lookup_object("gcode")
         gcode.register_command("ENABLE_STALLGUARD_CHECKS", self.enableChecks, desc="")
@@ -222,7 +248,7 @@ class CollisionDetection:
 
     def onKlippyConnect(self):
         #self.setupDrivers()
-        #self.enableChecks()
+        self.enableChecks()
 
         toolhead = self.printer.lookup_object("toolhead")
         kin = self.printer.lookup_object("toolhead").get_kinematics()
@@ -299,6 +325,8 @@ class CollisionDetection:
 
     def enableChecks(self, gcmd=None):
         if (self.loop == None):
+            for name, driver in self.drivers.items():
+                driver.onEnabled()
             reactor = self.printer.get_reactor()
             curTime = reactor.monotonic()
             self.loop = reactor.register_timer(self.doChecks, curTime + self.updateTime)

@@ -68,6 +68,8 @@ class DriverHelper:
         self.moving = False
         self.stepsMoving = False
         self.lastMove = None
+        self.lastMicroStep = -1
+        self.expectedPos = 0
         self.hasChanged = True
 
     # Perform some checks using the stallguard result to determine if the motor is 
@@ -108,7 +110,7 @@ class DriverHelper:
             #if (self.triggers <= 1):
             #    logging.warning("detecting slip, adjusting expected pos from %s to %s incase anomaly" % (str(self.expectedPos),str(lerp(self.expectedPos, result, 0.5))))
             #    self.expectedPos = self.expectedPos - difference #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
-            if (self.triggers > 0.1):
+            if (self.triggers > 0.250):
                 if (not self.hasChanged):
                     self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 else:
@@ -117,9 +119,9 @@ class DriverHelper:
                     self.triggers = 0
                     self.hasChanged = False
         else:
-            self.triggers = max(-0.1 if self.hasChanged else 0, self.triggers - updateTime)
+            self.triggers = max(-0.250 if self.hasChanged else 0, self.triggers - updateTime)
 
-        if (self.triggers <= -0.1):
+        if (self.triggers <= -0.250):
             logging.warning("%s expected change detected" % (self.name,))
             self.triggers = 0
             self.hasChanged = False
@@ -198,8 +200,8 @@ class CollisionDetection:
             return
         self.config = config
         self.printer = config.get_printer()
-        self.updateTime = float(config.get("update_time", 0.1))
-        self.disableOnHome = bool(config.get("disable_on_home", True))
+        self.updateTime = float(config.get("update_time", 0.125))
+        self.disableOnHome = False #bool(config.get("disable_on_home", True))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
         self.testMode = bool(config.get("test_mode", False))

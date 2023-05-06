@@ -58,6 +58,7 @@ class DriverHelper:
         self.stepsMoving = False
         self.lastMicroStep = 0
         self.lastMove = None
+        self.lastKnownPrintTime = 0
 
         self.hasChanged = True
 
@@ -86,13 +87,13 @@ class DriverHelper:
     # Then we wait for a driver command to be picked up to make sure deviation was expected
     # or not.
     #                                  |----| 0.250 second max
-    #   sg_value_deviated: - - - - - - X--✓ - - -
+    #   sg_value_deviated: - - - - - - X--OK - - -
     #   move_sent_to_drv : - - - - - - - -X - - -
     #
     # works great except I need to find a better way to determine when the specifc motor is
     # to change momentum. sometimes the motor changes to a different, but consistent
     # value and its not picking up on that.
-    def check(self, eventtime, updateTime, faultOnDetect):
+    def check(self, eventtime, updateTime, onDetect):
         status = self.driver.get_status()
         standStillIndicator = False
         if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
@@ -101,6 +102,7 @@ class DriverHelper:
         if (standStillIndicator):
             self.expectedPos = result
             self.triggers = 0
+            self.hasChanged = False
 
         if (self.history == None): self.history = result
 
@@ -119,7 +121,7 @@ class DriverHelper:
             #    self.expectedPos = self.expectedPos - difference #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 0.250):
                 if (not self.hasChanged):
-                    if (faultOnDetect): self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
+                    onDetect(result, difference)
                 else:
                     logging.warning("%s slip ignored, intended change" % (self.name,))
                     self.expectedPos = result
@@ -177,6 +179,7 @@ class DriverHelper:
         #self.lastVelocity = velocity
         #self.lastStepPos = steppos
         self.lastMicroStep = microstepcounter
+        self.lastKnownPrintTime = clock
         #self.lastMove = move
 
         return movingChangedThisTick
@@ -340,9 +343,14 @@ class CollisionDetection:
         
         # driver
         for name, driver in self.drivers.items():
-            driver.check(eventtime, self.updateTime, self.faultOnDetection)
+            driver.check(eventtime, self.updateTime, self.onDetect)
 
         return eventtime + self.updateTime
+
+    # event when deviation is detected and no move command is detected
+    def onDetect(self, value, diff):
+        if (faultOnDetection):
+            self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(value),str(diff), str(self.deviationTolerance)))
 
     def get_status(self, eventtime):
         data = {}

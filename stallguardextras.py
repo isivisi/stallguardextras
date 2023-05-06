@@ -71,6 +71,7 @@ class DriverHelper:
         self.lastMicroStep = -1
         self.expectedPos = 0
         self.hasChanged = True
+        self.history = None
 
     # Perform some checks using the stallguard result to determine if the motor is 
     # slipping / about to slip.
@@ -82,10 +83,16 @@ class DriverHelper:
     # the motor will change momentum / change to a different move. Then grab the sg value,
     # wait to see if it deviates and assume stalled if it does.
     #
+    # Then we wait for a driver command to be picked up to make sure deviation was expected
+    # or not.
+    #                                  |----| 0.250 second max
+    #   sg_value_deviated: - - - - - - X--✓ - - -
+    #   move_sent_to_drv : - - - - - - - -X - - -
+    #
     # works great except I need to find a better way to determine when the specifc motor is
     # to change momentum. sometimes the motor changes to a different, but consistent
     # value and its not picking up on that.
-    def check(self, eventtime, updateTime):
+    def check(self, eventtime, updateTime, faultOnDetect):
         status = self.driver.get_status()
         standStillIndicator = False
         if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
@@ -112,7 +119,7 @@ class DriverHelper:
             #    self.expectedPos = self.expectedPos - difference #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 0.250):
                 if (not self.hasChanged):
-                    self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
+                    if (faultOnDetect): self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(result),str(difference), str(expectedDropRange)))
                 else:
                     logging.warning("%s slip ignored, intended change" % (self.name,))
                     self.expectedPos = result
@@ -201,7 +208,7 @@ class CollisionDetection:
         self.config = config
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.125))
-        self.disableOnHome = False #bool(config.get("disable_on_home", True))
+        self.disableOnHome = bool(config.get("disable_on_home", True))
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
         self.testMode = bool(config.get("test_mode", False))
@@ -210,6 +217,8 @@ class CollisionDetection:
 
         self.drivers = {}
         self.extruders = []            
+
+        self.faultOnDetection = True
 
         self.printer.register_event_handler("klippy:connect", self.onKlippyConnect)
 
@@ -259,11 +268,13 @@ class CollisionDetection:
         self.disableChecks()
 
     def onHomingOn(self, *args):
-        self.disableChecks()
+        #self.disableChecks()
+        self.faultOnDetection = False
     
     def onHomingOff(self, *args):
-        self.setupDrivers()
-        self.enableChecks()
+        #self.setupDrivers()
+        #self.enableChecks()
+        self.faultOnDetection = True
     
     def setupDrivers(self):
         for name, driverDef in self.drivers.items():
@@ -308,8 +319,8 @@ class CollisionDetection:
 
     def enableChecks(self, gcmd=None):
         if (self.loop == None):
-            for name, driver in self.drivers.items():
-                driver.onEnabled()
+            #for name, driver in self.drivers.items():
+                #driver.onEnabled()
             reactor = self.printer.get_reactor()
             curTime = reactor.monotonic()
             self.loop = reactor.register_timer(self.doChecks, curTime + self.updateTime)
@@ -329,7 +340,7 @@ class CollisionDetection:
         
         # driver
         for name, driver in self.drivers.items():
-            driver.check(eventtime, self.updateTime)
+            driver.check(eventtime, self.updateTime, self.faultOnDetection)
 
         return eventtime + self.updateTime
 

@@ -58,7 +58,9 @@ class DriverHelper:
         self.stepsMoving = False
         self.lastMicroStep = 0
         self.lastMove = None
-        self.lastKnownPrintTime = 0
+        
+        # move queue we have yet to process
+        self.moveQueue = []
 
         self.hasChanged = True
 
@@ -121,7 +123,7 @@ class DriverHelper:
             #    self.expectedPos = self.expectedPos - difference #lerp(self.expectedPos, result, 0.5) # give it a chance to readjust incase of drastic change duing normal ops
             if (self.triggers > 0.250):
                 if (not self.hasChanged):
-                    onDetect(result, difference)
+                    onDetect(self, result, difference)
                 else:
                     logging.warning("%s slip ignored, intended change" % (self.name,))
                     self.expectedPos = result
@@ -148,24 +150,26 @@ class DriverHelper:
         microstepcounter = int(self.driver.mcu_tmc.get_register('MSCNT')) # 0 to 1023
 
         # testing new thing
-        move = self.getMove(eventtime)
-        clock = self.stepper.get_mcu().print_time_to_clock(self.stepper.get_mcu().estimated_print_time(eventtime))
+        mcu = self.stepper.get_mcu()
+        self.moveQueue += self.getMoves(eventtime-0.05, eventtime)
+        clock = mcu.print_time_to_clock(mcu.estimated_print_time(eventtime))
+        move = None
         if (move and self.lastMove):
             if (move.first_clock != self.lastMove.first_clock and not self.moving):
                 movingChangedThisTick = True
                 self.moving = True
-                self.lastMove = move
+                if (len(self.moveQueue)): self.lastMove = self.moveQueue.pop()
                 logging.warning("move started")
-            elif (clock > self.lastMove.first_clock and self.moving):
+            elif (clock > self.lastMove.last_clock and self.moving):
                 movingChangedThisTick = True
                 self.moving = False
                 logging.warning("move ended")
                 if (move.first_clock > self.lastMove.first_clock):
-                    self.lastMove = move
+                    if (len(self.moveQueue)): self.lastMove = self.moveQueue.pop()
                     self.moving = True
                     logging.warning("move continued")
         else:
-            self.lastMove = move
+            if (len(self.moveQueue)): self.lastMove = self.moveQueue.pop()
 
         if (microstepcounter != self.lastMicroStep and not self.stepsMoving):
             logging.warning("movement started")
@@ -189,17 +193,21 @@ class DriverHelper:
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
             "sg_triggers": self.triggers,
-            "latest_move": self.lastMove.getStatus() if self.lastMove else None
+            "latest_moves": [move.getStatus() for move in self.moveQueue]
         }
 
     # grab specifically just the start_position of the most recent move we are sending to the mcu
-    def getMove(self, eventtime):
+    def getMoves(self, start, end):
         if (not self.stepper): return None
-        clock = self.stepper.get_mcu().print_time_to_clock(eventtime)
+        startClock = clock = self.stepper.get_mcu().print_time_to_clock(start)
+        clock = self.stepper.get_mcu().print_time_to_clock(end)
         # first_clock, last_clock, start_position, step_count, interval, add
-        steps, count = self.stepper.dump_steps(1, 0, clock)
-        if not steps: return None
-        return MoveHelper(steps[0])
+        steps, count = self.stepper.dump_steps(1, startClock, clock)
+        if not steps: return []
+        returnSteps = []
+        for i in range(count):
+            returnSteps.append(MoveHelper(steps[i]))
+        return returnSteps
 
     def driverHasField(self, field):
         return field in self.driver.fields.field_to_register.keys()
@@ -348,9 +356,9 @@ class CollisionDetection:
         return eventtime + self.updateTime
 
     # event when deviation is detected and no move command is detected
-    def onDetect(self, value, diff):
-        if (faultOnDetection):
-            self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (self.name,str(value),str(diff), str(self.deviationTolerance)))
+    def onDetect(self, driver, value, diff):
+        if (self.faultOnDetection):
+            self.printer.invoke_shutdown("Detecting motor slip on motor %s. %s value deviated by %s from previous. maximum %s deviation" % (driver.name,str(value),str(diff), str(self.deviationTolerance)))
 
     def get_status(self, eventtime):
         data = {}

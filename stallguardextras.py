@@ -4,7 +4,7 @@
 #
 # This file may be distributed under the terms of the GNU GPLv3 license.
 
-import logging, chelper
+import logging, chelper, numpy
 
 supportedDrivers = [
     'TMC2130',
@@ -15,6 +15,9 @@ supportedDrivers = [
 
 def lerp(start, end, delta):
     return (start + (end - start) * delta)
+
+def mode(array):
+    return max(array, key=array.count)
 
 # copy of c struct data
 class MoveHelper:
@@ -52,6 +55,9 @@ class DriverHelper:
         self.lastStepPos = 0
         self.smoothedResult = 0
 
+        self.signalDeviation = 0
+        self.lastMode = 0
+
         #self.enableChecks = bool(sg.config.getsection(self.name).get('check_collisions', True))
 
         self.moving = False
@@ -61,6 +67,8 @@ class DriverHelper:
         
         # move queue we have yet to process
         self.moveQueue = []
+
+        self.signalHistory = [0] * 32 #int(60/sg.updateTime) # samples per second
 
         self.hasChanged = True
 
@@ -105,6 +113,14 @@ class DriverHelper:
     def check(self, eventtime, updateTime, onDetect):
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
 
+        self.signalHistory.append(result)
+        self.signalHistory.pop(0)
+
+        sigMode = mode(self.signalHistory)
+        
+        self.signalDeviation = abs(self.lastMode - sigMode)
+        #result = sigMode
+
         if (self.history == None): 
             self.history = result
 
@@ -144,6 +160,7 @@ class DriverHelper:
             self.hasChanged = False
 
         self.history = result
+        self.lastMode = self.signalDeviation
         self.expectedRange = expectedDropRange
 
     def hasMovementChanged(self, eventtime):
@@ -205,7 +222,8 @@ class DriverHelper:
         return {
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
-            "sg_triggers": self.triggers
+            "sg_triggers": self.triggers,
+            "sg_deviation": self.signalDeviation,
         }
 
     # grab moves sent to mcu

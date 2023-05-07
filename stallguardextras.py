@@ -51,6 +51,7 @@ class DriverHelper:
         self.lastVelocity = 0
         self.lastStepPos = 0
         self.smoothedResult = 0
+        self.historyLerp = 0
 
         #self.enableChecks = bool(sg.config.getsection(self.name).get('check_collisions', True))
 
@@ -103,26 +104,23 @@ class DriverHelper:
     # to change momentum. sometimes the motor changes to a different, but consistent
     # value and its not picking up on that.
     def check(self, eventtime, updateTime, onDetect):
-        status = self.driver.get_status()
-        standStillIndicator = False
-        if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
 
-        if (standStillIndicator):
-            self.expectedPos = result
-            self.triggers = 0
-            self.hasChanged = False
+        # cleanup results, removes very brief transients
+        self.historyLerp = lerp(self.historyLerp, result, updateTime * 0.85)
 
-        if (self.history == None): self.history = result
+        if (self.history == None): 
+            self.history = result
+            self.historyLerp = result
 
         # movement changed
         changedThisTick = self.hasMovementChanged(eventtime)
         self.hasChanged = True if changedThisTick else self.hasChanged
 
-        if (changedThisTick):
-            self.expectedPos = result
-            self.triggers = 0
-            self.hasChanged = False
+        #if (changedThisTick):
+        #    self.expectedPos = self.historyLerp
+        #    self.triggers = 0
+        #    self.hasChanged = False
 
         difference = self.expectedPos - result
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
@@ -146,6 +144,7 @@ class DriverHelper:
 
         if (self.triggers <= -0.250):
             logging.warning("%s expected change detected" % (self.name,))
+            self.expectedPos = result
             self.triggers = 0
             self.hasChanged = False
 
@@ -156,6 +155,11 @@ class DriverHelper:
         if (not self.stepper):
             return
         movingChangedThisTick = False
+
+        standStillIndicator = False
+        status = self.driver.get_status()
+        if (status['drv_status']): standStillIndicator = status['drv_status'].get('stst', False)
+        if (standStillIndicator): movingChangedThisTick = True
 
         steppos = self.lastStepPos
         steppos = self.stepper.get_commanded_position()
@@ -207,7 +211,7 @@ class DriverHelper:
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
             "sg_triggers": self.triggers,
-            "latest_moves": [move.getStatus() for move in self.moveQueue]
+            "sg_result_smoothed": self.historyLerp
         }
 
     # grab moves sent to mcu
@@ -233,10 +237,10 @@ class CollisionDetection:
         self.config = config
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.125))
-        self.disableOnHome = bool(config.get("disable_on_home", True))
+        self.disableOnHome = config.getboolean("disable_on_home", True)
         self.sgthrs = config.get("sgthrs", None)
         self.sgt = config.get("sgt", None)
-        self.testMode = bool(config.get("test_mode", False))
+        self.testMode = config.getboolean("test_mode", False)
         self.deviationTolerance = int(config.get("deviation_tolerance", 50))
         self.loop = None
 
@@ -270,7 +274,7 @@ class CollisionDetection:
                     # config.getsection(name)
                     self.extruders.append(obj)
                 else:
-                    if not bool(config.getsection(name).get("detect_collisions", True)):
+                    if not config.getsection(name).getboolean("detect_collisions", True):
                         logging.info("skipping %s" % (name,))
                         continue
                     self.drivers[name.split(" ")[1]] = DriverHelper(
@@ -383,8 +387,8 @@ class ExtruderDetection:
             return
         self.printer = config.get_printer()
         self.updateTime = float(config.get("update_time", 0.1))
-        self.jamDetectEnabled = bool(config.get("jam_detect", False))
-        self.runoutDetect = bool(config.get("runout_detect", False))
+        self.jamDetectEnabled = config.getboolean("jam_detect", False)
+        self.runoutDetect = config.getboolean("runout_detect", False)
 
 class StallGuardExtras:
     def __init__(self, config):

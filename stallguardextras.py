@@ -37,12 +37,12 @@ class MoveHelper:
         }
 
 class DriverHelper:
-    def __init__(self, sg, name, driver, stepper):
+    def __init__(self, sg, name, driver):
         self.name = name
         self.sg = sg
         self.printer = sg.printer
         self.driver = driver
-        self.stepper = stepper
+        #self.stepper = stepper
         self.history = None
         self.expectedRange = sg.deviationTolerance
         self.triggers = 0
@@ -249,31 +249,35 @@ class CollisionDetection:
 
         self.printer.add_object("collision_detection", self)
 
-    def onKlippyConnect(self):
-        #self.setupDrivers()
-        self.enableChecks()
-
-        toolhead = self.printer.lookup_object("toolhead")
-        kin = self.printer.lookup_object("toolhead").get_kinematics()
-        steppers = kin.get_steppers()
+        #toolhead = self.printer.lookup_object("toolhead")
+        #kin = self.printer.lookup_object("toolhead").get_kinematics()
+        #steppers = kin.get_steppers()
 
         #logging.info(str([s.get_name() for s in steppers]))
 
         # find all compatable drivers
         for name, obj in self.printer.lookup_objects():
             if any(driver.lower() in name.lower() for driver in supportedDrivers):
-                stepper = [s for s in steppers if s.get_name() == name.split(" ")[1]]
-                logging.info("%s found %s" % (name, str(stepper)))
+                #stepper = [s for s in steppers if s.get_name() == name.split(" ")[1]]
+
                 if ('extruder' in name):
+                    # self.printer.getsection(name)
                     self.extruders.append(obj)
                 else:
+                    if not bool(self.printer.getsection(name).get("detect_collisions", True)):
+                        logging.info("skipping %s" % (name,))
+                        continue
                     self.drivers[name.split(" ")[1]] = DriverHelper(
                         self,
                         name, 
                         obj, 
-                        stepper[0] if len(stepper) else None, 
+                        #stepper[0] if len(stepper) else None, 
                     )
                 logging.info("found stallguard compatible driver " + str(obj))
+
+    def onKlippyConnect(self):
+        #self.setupDrivers()
+        self.enableChecks()
 
     def onMotorOff(self, eventtime):
         self.disableChecks()

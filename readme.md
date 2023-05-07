@@ -19,6 +19,10 @@ deviation_tolerance: 50
 
 [extruder_detection]
 #WIP
+
+# you can disable detection per stepper if you so desire
+[tmc2209 mystepper]
+detect_collisions: False
 ```
 
 ## Moonraker Auto Update

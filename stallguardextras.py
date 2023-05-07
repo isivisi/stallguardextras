@@ -42,12 +42,12 @@ class DriverHelper:
         self.sg = sg
         self.printer = sg.printer
         self.driver = driver
-        #self.stepper = stepper
+        self.stepper = None
         self.history = None
         self.expectedRange = sg.deviationTolerance
         self.triggers = 0
         self.expectedPos = 0
-        self.trapq = stepper.get_trapq() if stepper else None # trapezoidal velocity queue for stepper
+        self.trapq = None       # trapezoidal velocity queue for stepper
         self.lastVelocity = 0
         self.lastStepPos = 0
         self.smoothedResult = 0
@@ -66,6 +66,13 @@ class DriverHelper:
 
         self.deviationTolerance = sg.deviationTolerance
 
+    def onKlippyConnect(self):
+        kin = self.printer.lookup_object("toolhead").get_kinematics()
+        steppers = kin.get_steppers()
+        foundStepper = [s for s in steppers if s.get_name() == self.name.split(" ")[1]]
+        if (len(foundStepper)):
+            self.stepper = foundStepper[0]
+            self.trapq = self.stepper.get_trapq()
     
     def onEnabled(self):
         self.moving = False
@@ -112,6 +119,11 @@ class DriverHelper:
         changedThisTick = self.hasMovementChanged(eventtime)
         self.hasChanged = True if changedThisTick else self.hasChanged
 
+        if (changedThisTick):
+            self.expectedPos = result
+            self.triggers = 0
+            self.hasChanged = False
+
         difference = self.expectedPos - result
         expectedDropRange = lerp(self.expectedRange, self.deviationTolerance, updateTime * 0.5)
             
@@ -141,6 +153,8 @@ class DriverHelper:
         self.expectedRange = expectedDropRange
 
     def hasMovementChanged(self, eventtime):
+        if (not self.stepper):
+            return
         movingChangedThisTick = False
 
         steppos = self.lastStepPos
@@ -196,7 +210,7 @@ class DriverHelper:
             "latest_moves": [move.getStatus() for move in self.moveQueue]
         }
 
-    # grab specifically just the start_position of the most recent move we are sending to the mcu
+    # grab moves sent to mcu
     def getMoves(self, start, end):
         if (not self.stepper): return None
         startClock = clock = self.stepper.get_mcu().print_time_to_clock(start)
@@ -249,35 +263,28 @@ class CollisionDetection:
 
         self.printer.add_object("collision_detection", self)
 
-        #toolhead = self.printer.lookup_object("toolhead")
-        #kin = self.printer.lookup_object("toolhead").get_kinematics()
-        #steppers = kin.get_steppers()
-
-        #logging.info(str([s.get_name() for s in steppers]))
-
         # find all compatable drivers
         for name, obj in self.printer.lookup_objects():
             if any(driver.lower() in name.lower() for driver in supportedDrivers):
-                #stepper = [s for s in steppers if s.get_name() == name.split(" ")[1]]
-
                 if ('extruder' in name):
-                    # self.printer.getsection(name)
+                    # config.getsection(name)
                     self.extruders.append(obj)
                 else:
-                    if not bool(self.printer.getsection(name).get("detect_collisions", True)):
+                    if not bool(config.getsection(name).get("detect_collisions", True)):
                         logging.info("skipping %s" % (name,))
                         continue
                     self.drivers[name.split(" ")[1]] = DriverHelper(
                         self,
                         name, 
                         obj, 
-                        #stepper[0] if len(stepper) else None, 
                     )
                 logging.info("found stallguard compatible driver " + str(obj))
 
     def onKlippyConnect(self):
         #self.setupDrivers()
         self.enableChecks()
+        for name in self.drivers:
+            self.drivers[name].onKlippyConnect()
 
     def onMotorOff(self, eventtime):
         self.disableChecks()

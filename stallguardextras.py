@@ -51,7 +51,6 @@ class DriverHelper:
         self.lastVelocity = 0
         self.lastStepPos = 0
         self.smoothedResult = 0
-        self.historyLerp = 0
 
         #self.enableChecks = bool(sg.config.getsection(self.name).get('check_collisions', True))
 
@@ -106,12 +105,8 @@ class DriverHelper:
     def check(self, eventtime, updateTime, onDetect):
         result = int(self.driver.mcu_tmc.get_register('SG_RESULT'))
 
-        # cleanup results, removes very brief transients
-        self.historyLerp = lerp(self.historyLerp, result, updateTime * 0.85)
-
         if (self.history == None): 
             self.history = result
-            self.historyLerp = result
 
         # movement changed
         changedThisTick = self.hasMovementChanged(eventtime)
@@ -210,8 +205,7 @@ class DriverHelper:
         return {
             "sg_result": self.history,
             "sg_expected": self.expectedPos,
-            "sg_triggers": self.triggers,
-            "sg_result_smoothed": self.historyLerp
+            "sg_triggers": self.triggers
         }
 
     # grab moves sent to mcu
